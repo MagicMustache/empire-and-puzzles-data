@@ -1,0 +1,13 @@
+# Build outputs. The catalogue is produced by the workflow and served from Pages; it is never
+# committed. See the README for why.
+heroes.json
+dist/
+live/
+
+# Raw MediaWiki API payloads, so the parser can be iterated on without refetching.
+.cache/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/

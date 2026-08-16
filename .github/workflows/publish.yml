@@ -1,0 +1,118 @@
+name: Scrape and publish
+
+# Weekly, plus a button. Empires & Puzzles adds heroes at roughly one event per week, so a
+# daily scrape would spend ~130 requests on the wiki to produce a byte-identical file six days
+# out of seven. Monday morning UTC lands after the weekend's wiki edits have settled.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Deploy even if the catalogue is unchanged"
+        type: boolean
+        default: false
+
+# Read-only on contents: nothing is committed. The catalogue is a build output, not source --
+# committing 4.9 MB weekly would add a quarter of a gigabyte a year to a repo whose actual
+# source is three Python files.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two runs deploy at once, but let a scheduled run finish rather than cancelling it
+# half way through a scrape.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  BASE_URL: https://magicmustache.github.io/empire-and-puzzles-data
+  # The catalogue has heroes with non-ASCII names (Sváfa, Ísöld). Without this the validator's
+  # own diagnostics can fail to encode on a mis-detected stdout.
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check requests
+
+      # The parser tests are the cheapest signal there is: they run without the network and
+      # catch a wikitext regression before it costs 130 requests to discover.
+      - name: Test the parser
+        run: python test_wikitext.py
+
+      - name: Fetch what is currently published
+        id: live
+        # Best-effort. A first run, or a Pages outage, must not block publishing -- the
+        # validator degrades to its absolute floors when there is no baseline.
+        run: |
+          mkdir -p live
+          if curl -fsSL --retry 3 "$BASE_URL/heroes.json.gz" -o live/heroes.json.gz; then
+            gunzip -c live/heroes.json.gz > live/heroes.json
+            curl -fsSL --retry 3 "$BASE_URL/manifest.json" -o live/manifest.json || true
+            echo "baseline=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No catalogue published yet -- validating against floors only."
+            echo "baseline=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Scrape the wiki
+        run: python scrape_heroes.py --out heroes.json -v
+
+      - name: Validate
+        run: |
+          if [ "${{ steps.live.outputs.baseline }}" = "true" ]; then
+            python validate.py heroes.json --against live/heroes.json
+          else
+            python validate.py heroes.json
+          fi
+
+      - name: Build the published files
+        id: build
+        run: python publish.py heroes.json --base-url "$BASE_URL" --against live/manifest.json
+
+      - name: Summary
+        run: |
+          {
+            echo "### Scrape complete"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Heroes | ${{ steps.build.outputs.hero_count }} |"
+            echo "| Version | \`${{ steps.build.outputs.version }}\` |"
+            echo "| Changed | ${{ steps.build.outputs.changed }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.build.outputs.changed == 'true' || inputs.force_deploy
+        with:
+          path: dist
+
+      - name: Deploy to Pages
+        id: deploy
+        if: steps.build.outputs.changed == 'true' || inputs.force_deploy
+        uses: actions/deploy-pages@v4
+
+      # Keeping the scrape around means a failed *deploy* can be diagnosed without re-running
+      # the scraper against the wiki.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heroes-json
+          path: heroes.json
+          retention-days: 14
+          if-no-files-found: ignore
