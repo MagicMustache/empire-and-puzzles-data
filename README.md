@@ -77,6 +77,22 @@ Pages must be set to deploy from Actions rather than a branch:
 **Settings → Pages → Build and deployment → Source: GitHub Actions**. Nothing else is needed —
 no secrets, no tokens, no accounts.
 
+## Operating it
+
+Two things need a human, and neither is weekly.
+
+**A failed run means the wiki changed.** The workflow only fails when the gate rejects a scrape or
+the parser tests break — in both cases the previously published catalogue stays up, so nothing is
+on fire and the app keeps serving what it has. GitHub emails you. Read the rejection reasons, fix
+`wikitext.py`, iterate with `scrape_heroes.py --no-network` against the cached payloads, and re-run
+the workflow. Only if it stays broken for weeks does the data actually go stale.
+
+**GitHub disables scheduled workflows after 60 days of repository inactivity.** This one applies
+here more than most repos: the workflow commits nothing by design, so a stretch of not touching
+this repo is genuinely 60 days of silence. GitHub emails a warning first and re-enabling is one
+click; any manual push also resets the clock. If it ever lapses unnoticed, the app degrades to
+"catalogue stopped updating", not to anything broken.
+
 ## Licence
 
 Hero data is derived from the [Empires & Puzzles Fandom wiki][wiki] and is licensed

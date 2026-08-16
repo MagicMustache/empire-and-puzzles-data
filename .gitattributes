@@ -1,0 +1,2 @@
+# The workflow's `run:` blocks execute under bash on Linux; a stray CR breaks them.
+* text=auto eol=lf
