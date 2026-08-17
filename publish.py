@@ -5,6 +5,7 @@ Turns a validated `heroes.json` into the two files the app actually fetches.
     dist/manifest.json   a few hundred bytes -- what the app polls
     dist/heroes.json.gz  ~630 KB -- what it downloads when the manifest says the version moved
     dist/index.html      so the Pages root is not a 404
+    dist/<static/*>      copied verbatim -- the app's privacy policy lives here
 
 The split is the whole point of the design. A phone checking for updates should not pull 4.8 MB
 to discover there is nothing new, and it should not have to trust an HTTP cache to tell it so.
@@ -22,10 +23,16 @@ import gzip
 import hashlib
 import json
 import os
+import shutil
 import sys
 
 CATALOGUE_NAME = "heroes.json.gz"
 MANIFEST_NAME = "manifest.json"
+
+# Pages deploys dist/ as one artifact and replaces the whole site, so a page that is not written
+# into dist/ on every run disappears at the next deploy. Anything that needs to stay served
+# belongs here, next to the generated files rather than committed into them.
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 INDEX_HTML = """<!doctype html>
 <meta charset="utf-8">
@@ -69,6 +76,9 @@ def main() -> int:
     base = args.base_url.rstrip("/")
 
     os.makedirs(args.out, exist_ok=True)
+
+    if os.path.isdir(STATIC_DIR):
+        shutil.copytree(STATIC_DIR, args.out, dirs_exist_ok=True)
 
     # mtime=0 so an unchanged catalogue produces a byte-identical archive; otherwise every run
     # looks like a change to anything comparing the served bytes.
